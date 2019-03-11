@@ -1,4 +1,4 @@
 # LabScripts
 
 
-Testing 
+Master scripts developed for the Kirwan Memory Lab.
