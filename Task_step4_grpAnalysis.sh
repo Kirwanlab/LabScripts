@@ -4,7 +4,7 @@
 #SBATCH --ntasks=10   # number of processor cores (i.e. tasks)
 #SBATCH --nodes=1   # number of nodes
 #SBATCH --mem-per-cpu=10gb   # memory per CPU core
-#SBATCH -J "sttR4"   # job name
+#SBATCH -J "TS4"   # job name
 
 # Compatibility variables for PBS. Delete if not needed.
 export PBS_NODEFILE=`/fslapps/fslutils/generate_pbs_nodefile`

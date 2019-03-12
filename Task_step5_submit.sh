@@ -4,10 +4,10 @@
 
 
 
-workDir=~/compute/STT_reml
+workDir=~/compute/STT_reml					###??? update this
 slurmDir=${workDir}/derivatives/Slurm_out
 time=`date '+%Y_%m_%d-%H_%M_%S'`
-outDir=${slurmDir}/sttR5_${time}
+outDir=${slurmDir}/TS5_${time}
 
 mkdir -p $outDir
 
