@@ -36,8 +36,8 @@ mkdir -p $grpDir
 # make list of decons
 cd $refDir
 
-c=0; for i in *stats+tlrc.HEAD; do
-	deconList[$c]=${i%_*}
+c=0; for i in *stats_REML+tlrc.HEAD; do
+	deconList[$c]=${i%%_*}
 	let c=$[$c+1]
 done
 
