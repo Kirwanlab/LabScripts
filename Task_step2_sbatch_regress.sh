@@ -59,9 +59,9 @@ deconNum=(3)													# See Note 4 above
 deconPref=(StimBlk Blk Int)										# array of prefix for each planned decon (length must equal sum of $deconNum)
 
 
-# For 1D timing files
-deconLen=(3)													# trial duration for each Phase (argument for BLOCK in deconvolution). Use when $txtFile=0 or $txtTime=0
-deconTiming=(Test1_TF_4_behVect)								# array of timing files for each planned deconvolution (length must == $deconPref)
+## For 1D timing files
+#deconLen=(3)													# trial duration for each Phase (argument for BLOCK in deconvolution). Use when $txtFile=0 or $txtTime=0
+#deconTiming=(Test1_TF_4_behVect)								# array of timing files for each planned deconvolution (length must == $deconPref)
 
 
 # For txt timing files
