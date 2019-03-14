@@ -23,15 +23,20 @@ export OMP_NUM_THREADS=$SLURM_CPUS_ON_NODE
 
 ### --- Notes
 #
-# 1) Will do deconvolutions (OLS, GLS), post files, and print out info
+# 1) Will do REML deconvolution (GLS), post files, and print out info
 #
 # 2) Can do a variable number of deconvolutions for each phase of the experiment
 #		generates the scripts, and then runs them - turn off $runDecons for simple script generation
 #
-# 3) Assumes timing files exist in derivatives/sub-123/timing_files, and are in .1D format
+# 3) Assumes timing files exist in derivatives/sub-123/timing_files
+#		so a wildcard can catch only timing 1D files
 #
-# 4) Only the variables at the beginning of the script need to be updated (this is NEW and COOL)
-
+# 4) deconNum = number of planned decons per PHASE of experimet.
+#		Number of positions corresponds to step1 $phaseArr
+#		Enter number of desired decons for each pahse of experiment
+#			e.g. deconNum=(1 2 1) means one decon from first phase, two from second, etc.
+#		Note - A value must be entered for each phase, even if no decon is desired
+#			e.g. deconNum=(0 1 0) for one only decon from second phase, and no others
 
 
 
@@ -39,47 +44,36 @@ subj=$1
 testMode=$2
 
 
-														###??? update these variables/arrays - NEW: only this section needs to be updated!
-parDir=~/compute/STT_reml					  			# parent dir, where derivatives is located
+### --- Experimenter input --- ###
+#
+# Change parameters for your study in this section.
+
+parDir=~/compute/SleepBrain_BIDS					  			# parent dir, where derivatives is located
 workDir=${parDir}/derivatives/$subj
 
-doREML=1												# conduct GLS decon (1=on), runDecons must be 1
-runDecons=1												# toggle for running decon/reml scripts and post hoc (1=on)
+txtFile=1														# whether timing files are in txt format (1) or 1D (0)
+txtTime=1														# if txt file has block duration (1:3) for pmBLOCK (1=on)
+runDecons=1														# toggle for running reml scripts and post hoc (1=on) or just writing scripts (0)
 
-deconNum=(2 2 2)										# number of planned decons per PHASE, corresponds to $phaseArr from step1 (STUDY TEST1 TEST2). E.g. (2 1 1) = the first phase will have 2 deconvolutions, and the second and third phase will both have 1 respectively
-deconLen=(3 3 4.5)										# trial duration for each Phase (argument for BLOCK in deconvolution)
-deconPref=(SpT1 SpT1pT2 T1 T1pT2 T2 T2fT1)				# array of prefix for each planned decon (length must equal sum of $deconNum)
-
-deconTiming=(
-Study_pred_Test1_TF_4_behVect
-Study_pred_Test1_pred_Test2_TF_4_behVect
-Test1_TF_4_behVect
-Test1_pred_Test2_TF_4_behVect
-Test2_TF_4_behVect
-Test2_ref_Test1_TF_4_behVect
-)														# array of timing files for each planned deconvolution (length must == $deconPref)
+deconNum=(3)													# See Note 4 above
+deconPref=(StimBlk Blk Int)										# array of prefix for each planned decon (length must equal sum of $deconNum)
 
 
+# For 1D timing files
+deconLen=(3)													# trial duration for each Phase (argument for BLOCK in deconvolution). Use when $txtFile=0 or $txtTime=0
+deconTiming=(Test1_TF_4_behVect)								# array of timing files for each planned deconvolution (length must == $deconPref)
 
-### --- Not Lazy Section - for those who really like their data well organized
-#
-# This section is for setting the behavioral sub-brick labels (beh_foo, beh_bar). If not
-# used (NotLazy=0), then the labels are beh_1, beh_2, etc.
-#
-# In order to work, the arrays below must have a title that matches $deconPref (e.g. arrSpT1 <- deconPref=(SpT1))
-#
-# Also, the length of the array must be equal to the number of .1D files for the deconvolution
-#
-# The number of arrays should equal the length of $deconTiming
 
-NotLazy=1												# 1=on
+# For txt timing files
+txtStimBlk=(${subj}_TF_Stim_plus_Blk.txt ${subj}_TF_Fbk_all.txt ${subj}_TF_GFbk.txt)
+txtBlk=(${subj}_TF_{Stim,Blk,Fbk_all,GFbk}.txt)
+txtInt=(${subj}_TF_{Stim,Blk,Fbk_int,Fbk_not,GFbk}.txt)
 
-arrSpT1=(R-Hit R-FA R-CR R-Miss NR)						# arrFoo matches a $deconPref value, one string per .1D file (e.g. arrSpT1=(Hit CR Miss FA))
-arrSpT1pT2=(R-HH R-HF R-FH R-FF R-MCH R-MCF NR)
-arrT1=(T1Hit T1FA T1CR T1Miss NR)
-arrT1pT2=(HH HF FH FF MH MF CH CF NR)
-arrT2=(T2Hit T2FA NR)
-arrT2fT1=(H1H2 H1F2 F1H2 F1F2 M1H2 M1F2 C1H2 C1F2 NR)
+
+# Label beh sub-bricks, per decon
+namStimBlk=(StimBlk Fbk GFbk)									# "Foo" of namFoo matches a $deconPref value, one string per timing file (e.g. deconPref=(SpT1); namSpT1=(Hit CR Miss FA))
+namBlk=(Stim Blk Fbk GFbk)
+namInt=(Stim Blk FbkI FbkN GFbk)
 
 
 
@@ -88,10 +82,11 @@ arrT2fT1=(H1H2 H1F2 F1H2 F1F2 M1H2 M1F2 C1H2 C1F2 NR)
 #
 # Determine number of phases, and number of blocks per phase
 # then set these as arrays. Set up decon arrays.
-# Check the deconvolution variables are set up correctly
+# Check the deconvolution variables are set up correctly.
+# Function for writing decon script.
 
 
-# determine num phases/blocks
+### determine num phases/blocks
 cd $workDir
 
 > tmp.txt
@@ -113,7 +108,7 @@ phaseArr=(`cat phase_list.txt | awk '{print $2}'`)
 phaseLen=${#phaseArr[@]}
 
 
-# checks
+### checks
 if [ ! ${#phaseArr[@]} -gt 0 ]; then
 	echo "" >&2
 	echo "Problem determinig number of phases and blocks per phase. Check step1 setup. Exit 1" >&2
@@ -126,11 +121,13 @@ for i in ${deconNum[@]}; do
 	numDecon=$(( $numDecon + $i ))
 done
 
-if [ $numDecon != ${#deconTiming[@]} ] || [ $numDecon != ${#deconPref[@]} ]; then
-	echo "" >&2
-	echo "Number of planned deconvolutions != to number of timing files or prefixes. Exit 2" >&2
-	echo "" >&2
-	exit 2
+if [ $txtFile != 1 ]; then
+	if [ $numDecon != ${#deconTiming[@]} ] || [ $numDecon != ${#deconPref[@]} ]; then
+		echo "" >&2
+		echo "Number of planned deconvolutions != to number of timing files or prefixes. Exit 2" >&2
+		echo "" >&2
+		exit 2
+	fi
 fi
 
 if [ $phaseLen != ${#deconNum[@]} ]; then
@@ -140,13 +137,139 @@ if [ $phaseLen != ${#deconNum[@]} ]; then
 	exit 3
 fi
 
-tfCount=`ls timing_files/*.01.1D | wc -l`
-if [ $tfCount == 0 ]; then
-	echo "" >&2
-	echo "Did not detect dir \"timing_files\" or timing_files/*01.1D in $workDir. Exit 4" >&2
-	echo "" >&2
-	exit 4
+if [ $txtFile != 1 ]; then
+	tfCount=`ls timing_files/*.01.1D | wc -l`
+	if [ $tfCount == 0 ]; then
+		echo "" >&2
+		echo "Did not detect dir \"timing_files\" or timing_files/*01.1D in $workDir. Exit 4" >&2
+		echo "" >&2
+		exit 4
+	fi
 fi
+
+if [ $txtTime != 1 ] && [ ${#deconLen[@]} -lt 1 ]; then
+	echo >&2
+	echo "A block duration argument is needed if txtTime=0. Exit 5" >&2
+	echo >&2
+	exit 5
+fi
+
+
+
+### Function - write deconvolution script
+GenDecon (){
+
+	# assign vars for readability
+	if [ $txtFile == 1 ]; then
+		if [ $txtTime == 1 ]; then
+
+			local h_phase=$1
+			local h_block=$2
+		    local h_input=$3
+		    local h_out=$4
+		    local h_len=$5
+
+		    for aa in {1..5}; do
+			    shift
+		    done
+
+		    local h_arr=( "$@" )
+		    local nam=(${h_arr[@]:0:$h_len})
+		    local txt=(${h_arr[@]:$h_len})
+
+		else
+			local h_phase=$1
+			local h_block=$2
+		    local h_input=$3
+		    local h_out=$4
+		    local h_len=$5
+		    local h_trlen=$6
+
+		    for aa in {1..6}; do
+			    shift
+		    done
+
+		    local h_arr=( "$@" )
+		    local nam=(${h_arr[@]:0:$h_len})
+		    local txt=(${h_arr[@]:$h_len})
+		fi
+	else
+		local h_phase=$1
+		local h_block=$2
+		local h_tfile=$3
+		local h_trlen=$4
+	    local h_input=$5
+	    local h_out=$6
+
+	    for aa in {1..6}; do
+		    shift
+	    done
+	    local nam=( "$@" )
+    fi
+
+
+	# build motion list
+	unset stimBase
+    x=1
+
+    for ((r=1; r<=${h_block}; r++)); do
+        for ((b=0; b<=5; b++)); do
+
+            stimBase+="-stim_file $x mot_demean_${h_phase}.r0${r}.1D'[$b]' -stim_base $x -stim_label $x mot_$x "
+            let x=$[$x+1]
+        done
+    done
+
+
+	# build behavior list
+	unset stimBeh
+
+
+	# if txt files supplied
+	if [ $txtFile == 1 ]; then
+		if [ $txtTime == 1 ]; then
+			cc=0; while [ $cc -lt ${#txt[@]} ]; do
+				stimBeh+="-stim_times_AM1 $x timing_files/${txt[$cc]} \"dmBLOCK(1)\" -stim_label $x beh_${nam[$cc]} "
+				let x=$[$x+1]
+				let cc=$[$cc+1]
+			done
+		else
+			cc=0; while [ $cc -lt ${#txt[@]} ]; do
+				stimBeh+="-stim_times $x timing_files/${txt[$cc]} \"BLOCK(${h_trlen},1)\" -stim_label $x beh_${nam[$cc]} "
+				let x=$[$x+1]
+				let cc=$[$cc+1]
+			done
+		fi
+
+	# if 1D files supplies
+	else
+	    tBeh=`ls timing_files/${h_tfile}* | wc -l`
+	    for ((t=1; t<=$tBeh; t++)); do
+	        stimBeh+="-stim_times $x timing_files/${h_tfile}.0${t}.1D \"BLOCK(${h_trlen},1)\" -stim_label $x beh_${nam[$(($t-1))]} "
+	        let x=$[$x+1]
+	    done
+    fi
+
+
+	# num_stimts
+    h_nstim=$(($x-1))
+
+
+	# write script
+    echo "3dDeconvolve \
+    -x1D_stop \
+    -input $h_input \
+    -censor censor_${h_phase}_combined.1D \
+    -polort A -float \
+    -num_stimts $h_nstim \
+    $stimBase \
+    $stimBeh \
+    -jobs 6 \
+    -x1D X.${h_out}.xmat.1D \
+    -xjpeg X.${h_out}.jpg \
+    -x1D_uncensored X.${h_out}.nocensor.xmat.1D \
+    -bucket ${h_out}_stats -errts ${h_out}_errts" > ${h_out}_deconv.sh
+}
 
 
 
@@ -186,91 +309,12 @@ done
 
 ### --- Deconvolve --- ###
 #
-# A deconvolution (OLS) script is written (for review) and then run.
-# Currently, behaviors are called beh_1, beh_2 etc due to practical
-# constraints. I'll probably fix this in the future. A deconv script
-# is written for each run of the experiment, and for different
-# phases a conditional allows control over things like timing
-# files and different block times. Timing files are not constructed.
-# A REML (GLS) script is written, for future use.
+# A deconvolution script (foo_deconv.sh) is generated and ran for
+# each planned deconvolution.
 
-
-# Function - write deconvolution script
-GenDecon (){
-
-	# assign vars for readability
-	local h_phase=$1
-	local h_block=$2
-	local h_tfile=$3
-	local h_trlen=$4
-    local h_input=$5
-    local h_out=$6
-
-    if [ $NotLazy == 1 ]; then
-	    for aa in {1..6}; do
-		    shift
-	    done
-	    local h_arr=( "$@" )
-	fi
-
-
-	# build motion list
-	unset stimBase
-    x=1
-
-    for ((r=1; r<=${h_block}; r++)); do
-        for ((b=0; b<=5; b++)); do
-
-            stimBase+="-stim_file $x mot_demean_${h_phase}.r0${r}.1D'[$b]' -stim_base $x -stim_label $x mot_$x "
-            let x=$[$x+1]
-        done
-    done
-
-
-	# build behavior list
-	unset stimBeh
-    tBeh=`ls timing_files/${h_tfile}* | wc -l`
-
-	if [ $NotLazy == 1 ]; then
-	    for ((t=1; t<=$tBeh; t++)); do
-	        stimBeh+="-stim_times $x timing_files/${h_tfile}.0${t}.1D \"BLOCK(${h_trlen},1)\" -stim_label $x beh_${h_arr[$(($t-1))]} "
-	        let x=$[$x+1]
-	    done
-	else
-	    for ((t=1; t<=$tBeh; t++)); do
-	        stimBeh+="-stim_times $x timing_files/${h_tfile}.0${t}.1D \"BLOCK(${h_trlen},1)\" -stim_label $x beh_$t "
-	        let x=$[$x+1]
-	    done
-    fi
-
-
-	# num_stimts
-    h_nstim=$(($x-1))
-
-
-	# write script
-    echo "3dDeconvolve \
-    -input $h_input \
-    -censor censor_${h_phase}_combined.1D \
-    -polort A -float \
-    -num_stimts $h_nstim \
-    $stimBase \
-    $stimBeh \
-    -jobs 6 \
-    -bout -fout -tout \
-    -x1D X.${h_out}.xmat.1D \
-    -xjpeg X.${h_out}.jpg \
-    -x1D_uncensored X.${h_out}.nocensor.xmat.1D \
-    -errts ${h_out}_errts \
-    -bucket ${h_out}_stats" > ${h_out}_deconv.sh
-}
-
-
-### write, run deconvolution scripts
 c=0; count=0; while [ $c -lt $phaseLen ]; do
 
 	phase=${phaseArr[$c]}
-	trialLen=${deconLen[$c]}
 
 	# create input list
 	unset input
@@ -278,32 +322,38 @@ c=0; count=0; while [ $c -lt $phaseLen ]; do
 		input+="${j%.*} "
 	done
 
-
-	# for each planned decons
+	# for each planned decon
 	numD=${deconNum[$c]}
 	for(( i=1; i<=$numD; i++)); do
 
-		# pull timing, prefix
 		out=${deconPref[$count]}
-		tfile=${deconTiming[$count]}
-
 
 		# write script
-		if [ $NotLazy == 1 ]; then
-			hold=$(eval echo \${arr${out}[@]})
-			GenDecon $phase ${blockArr[$c]} $tfile $trialLen "$input" $out $hold
+		if [ $txtFile == 1 ]; then
+
+			holdName=($(eval echo \${nam${out}[@]}))
+			holdTxt=$(eval echo \${txt${out}[@]})
+
+			if [ $txtTime == 1 ]; then
+				GenDecon $phase ${blockArr[$c]} "$input" $out ${#holdName[@]} ${holdName[@]} $holdTxt
+			else
+				GenDecon $phase ${blockArr[$c]} "$input" $out ${#holdName[@]} ${deconLen[$c]} ${holdName[@]} $holdTxt
+			fi
 		else
-			GenDecon $phase ${blockArr[$c]} $tfile $trialLen "$input" $out
+
+			holdName=($(eval echo \${nam${out}[@]}))
+			GenDecon $phase ${blockArr[$c]} ${deconTiming[$count]} ${deconLen[$c]} "$input" $out ${#holdName[@]}
 		fi
-		count=$(($count+1))
 
 		# run script
-		if [ $runDecons == 1 ]; then
-			if [ ! -f ${out}_stats+tlrc.HEAD ]; then
-				source ${out}_deconv.sh
-			fi
+		if [ -f ${out}_stats.REML_cmd ]; then
+			rm ${out}_stats.REML_cmd
 		fi
+		source ${out}_deconv.sh
+
+		count=$(($count+1))
 	done
+
 	let c=$[$c+1]
 done
 
@@ -312,8 +362,7 @@ done
 
 #### --- REML and Post Calcs --- ###
 #
-# REML deconvolution (GLS) is run, excluding WM signal. REML will
-# probably become standard soon, so I'll get this working at some point.
+# REML deconvolution (GLS) is run, excluding WM signal.
 # Global SNR and corr are calculated.
 
 
@@ -343,62 +392,47 @@ c=0; count=0; while [ $c -lt $phaseLen ]; do
 
 
 	# timeseries of eroded WM
-	if [ $doREML == 1 ]; then
-		if [ ! -f ${phase}_WMe_rall+tlrc.HEAD ]; then
+	if [ ! -f ${phase}_WMe_rall+tlrc.HEAD ]; then
 
-			3dTcat -prefix tmp_allRuns_${phase} run-*${phase}_volreg_clean+tlrc.HEAD
-			3dcalc -a tmp_allRuns_${phase}+tlrc -b final_mask_WM_eroded+tlrc -expr "a*bool(b)" -datum float -prefix tmp_allRuns_${phase}_WMe
-			3dmerge -1blur_fwhm 20 -doall -prefix ${phase}_WMe_rall tmp_allRuns_${phase}_WMe+tlrc
-		fi
+		3dTcat -prefix tmp_allRuns_${phase} run-*${phase}_volreg_clean+tlrc.HEAD
+		3dcalc -a tmp_allRuns_${phase}+tlrc -b final_mask_WM_eroded+tlrc -expr "a*bool(b)" -datum float -prefix tmp_allRuns_${phase}_WMe
+		3dmerge -1blur_fwhm 20 -doall -prefix ${phase}_WMe_rall tmp_allRuns_${phase}_WMe+tlrc
 	fi
 
 
 	for j in ${regArr[@]}; do
-
-		# kill if decon failed
 		if [ $runDecons == 1 ]; then
-			if [ ! -f ${j}_stats+tlrc.HEAD ]; then
+
+
+			# REML
+			if [ ! -f ${j}_stats_REML+tlrc.HEAD ]; then
+				tcsh -x ${j}_stats.REML_cmd -dsort ${phase}_WMe_rall+tlrc
+			fi
+
+
+			# kill if REMl failed
+			if [ ! -f ${j}_stats_REML+tlrc.HEAD ]; then
 				echo "" >&2
-				echo "Decon failed on $j ... Exit 5" >&2
+				echo "REML failed on $j probably due to behavioral timing file issues ... Exit 5" >&2
 				echo "" >&2
 				exit 5
 			fi
-		fi
 
 
-		if [ $runDecons == 1 ]; then
-			if [ $doREML == 1 ]; then
+			# calc SNR, corr
+			if [ ! -f ${j}_TSNR+tlrc.HEAD ]; then
 
-				# REML
-				if [ ! -f ${j}_stats_REML+tlrc.HEAD ]; then
-					tcsh -x ${j}_stats.REML_cmd -dsort ${phase}_WMe_rall+tlrc
-				fi
+				3dTstat -stdev -prefix tmp_${j}_allNoise ${j}_errts_REML+tlrc"[${countS}]"
 
+				3dcalc -a tmp_${phase}_allSignal+tlrc \
+				-b tmp_${j}_allNoise+tlrc \
+				-c full_mask+tlrc \
+				-expr 'c*a/b' -prefix ${j}_TSNR
 
-				# kill if REMl failed
-				if [ ! -f ${j}_stats_REML+tlrc.HEAD ]; then
-					echo "" >&2
-					echo "REML failed on $j ... Exit 6" >&2
-					echo "" >&2
-					exit 6
-				fi
-
-
-				# calc SNR, corr
-				if [ ! -f ${j}_TSNR+tlrc.HEAD ]; then
-
-					3dTstat -stdev -prefix tmp_${j}_allNoise ${j}_errts_REML+tlrc"[${countS}]"
-
-					3dcalc -a tmp_${phase}_allSignal+tlrc \
-					-b tmp_${j}_allNoise+tlrc \
-					-c full_mask+tlrc \
-					-expr 'c*a/b' -prefix ${j}_TSNR
-
-					3dTnorm -norm2 -prefix tmp_${j}_errts_unit ${j}_errts_REML+tlrc
-					3dmaskave -quiet -mask full_mask+tlrc tmp_${j}_errts_unit+tlrc > ${j}_gmean_errts_unit.1D
-					3dcalc -a tmp_${j}_errts_unit+tlrc -b ${j}_gmean_errts_unit.1D -expr 'a*b' -prefix tmp_${j}_DP
-					3dTstat -sum -prefix ${j}_corr_brain tmp_${j}_DP+tlrc
-				fi
+				3dTnorm -norm2 -prefix tmp_${j}_errts_unit ${j}_errts_REML+tlrc
+				3dmaskave -quiet -mask full_mask+tlrc tmp_${j}_errts_unit+tlrc > ${j}_gmean_errts_unit.1D
+				3dcalc -a tmp_${j}_errts_unit+tlrc -b ${j}_gmean_errts_unit.1D -expr 'a*b' -prefix tmp_${j}_DP
+				3dTstat -sum -prefix ${j}_corr_brain tmp_${j}_DP+tlrc
 			fi
 		fi
 
@@ -428,7 +462,7 @@ done
 #### --- Print out info, Clean --- ###
 #
 # Print out information about the data - of particulatr interest
-# is the number of TRs censored, which steps3/4 use. This involves
+# is the number of TRs censored, which steps3-5 use. This involves
 # producing the needed files, generating a set of review scripts,
 # and then running my favorite. Many intermediates get removed.
 
@@ -437,6 +471,7 @@ done
 3dcopy full_mask+tlrc full_mask.${subj}+tlrc
 
 if [ $runDecons == 1 ]; then
+
 	for i in ${phaseArr[@]}; do
 
 		cat outcount.run-*${i}.1D > outcount_all_${i}.1D
@@ -454,9 +489,9 @@ if [ $runDecons == 1 ]; then
 		for k in ${deconPref[@]}; do
 
 			# a touch more organization (gen*py is very needy)
-			dset=${k}_stats+tlrc
+			dset=${k}_stats_REML+tlrc
 			cp X.${k}.xmat.1D X.xmat.1D
-			3dcopy ${k}_errts+tlrc errts.${subj}+tlrc
+			3dcopy ${k}_errts_REML+tlrc errts.${subj}+tlrc
 
 
 			# generate script
