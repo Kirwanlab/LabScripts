@@ -1,5 +1,20 @@
 #!/bin/bash
 
+#SBATCH --time=10:00:00   # walltime
+#SBATCH --ntasks=6   # number of processor cores (i.e. tasks)
+#SBATCH --nodes=1   # number of nodes
+#SBATCH --mem-per-cpu=4gb   # memory per CPU core
+#SBATCH -J "TS7"   # job name
+
+# Compatibility variables for PBS. Delete if not needed.
+export PBS_NODEFILE=`/fslapps/fslutils/generate_pbs_nodefile`
+export PBS_JOBID=$SLURM_JOB_ID
+export PBS_O_WORKDIR="$SLURM_SUBMIT_DIR"
+export PBS_QUEUE=batch
+
+# Set the max number of threads to use for programs using OpenMP. Should be <= ppn. Does nothing if the program doesn't use OpenMP.
+export OMP_NUM_THREADS=$SLURM_CPUS_ON_NODE
+
 
 
 
@@ -18,22 +33,22 @@
 #		binarized, and voxels defined by mutliple over-lapping masks
 #		will be excluded.
 #
-# 3) Will also blur data (since we don't blur for ETAC)
+# 3) A print out of the number of voxels in/excluded is supplied (info_*.txt)
 #
-# 4) A print out of the number of voxels in/excluded is supplied (info_*.txt)
-#
-# 5) Again, betas will not be extracted from participants who moved too much
+# 4) Again, betas will not be extracted from participants who moved too much
 
 
 
 
 
 # general vars											###??? Update these
-workDir=/Volumes/Yorick/STT_new
-roiDir=${workDir}/Analyses/roiAnalysis
-grpDir=${workDir}/Analyses/grpAnalysis
-priorDir=/Volumes/Yorick/Templates/vold2_mni/priors_HipSeg
-refFile=${workDir}/s1295/SpT1_stats
+parDir=~/compute/STT_reml
+workDir=${parDir}/derivatives
+roiDir=${parDir}/Analyses/roiAnalysis
+betaDir=${roiDir}/sub_betas
+grpDir=${parDir}/Analyses/grpAnalysis
+priorDir=~/bin/Templates/vold2_mni/priors_HipSeg
+refDir=${workDir}/sub-1295
 
 
 # decon vars
@@ -41,9 +56,6 @@ compList=(SpT1 SpT1pT2 T1 T1pT2 T2 T2fT1)				# matches decon prefix
 arrA=(33 39 53 59 97 103)								# setA beh sub-brik for etacList
 arrB=(36 42 56 62 100 106)								# steB
 compLen=${#compList[@]}
-blurX=2													# blur multiplier
-
-
 
 
 # function - search array for string
@@ -58,25 +70,8 @@ MatchString (){
 
 
 ### make Sub, CA1, CA2/3/DG masks
-mkdir -p $roiDir
+mkdir -p $roiDir $betaDir
 cd $roiDir
-
-# ref files
-if [ ! -f ${refFile}.nii.gz ]; then
-	3dcopy ${refFile}+tlrc ${refFile}.nii.gz
-fi
-
-
-gridSize=`fslhd ${refFile}.nii.gz | grep "pixdim1" | awk '{print $2}'`
-int=`printf "%.0f" $gridSize`
-blurInt=$(($blurX * $int))
-
-
-if [ ! -f ${refFile}_blur${blurInt}+tlrc.HEAD ]; then
-	3dmerge -prefix ${refFile}_blur${blurInt} -1blur_fwhm $blurInt -doall ${refFile}+tlrc
-	3dcopy ${refFile}_blur${blurInt}+tlrc ${refFile}_blur${blurInt}.nii.gz
-fi
-
 
 
 for i in L R; do
@@ -86,7 +81,7 @@ for i in L R; do
 		for j in CA{1..3} DG Sub; do
 
 			c3d ${priorDir}/${i}_${j}_prob.nii.gz -thresh 0.3 1 1 0 -o tmp_${i}_${j}.nii.gz
-			3dfractionize -template ${refFile}_blur${blurInt}+tlrc -input tmp_${i}_${j}.nii.gz -prefix tmp_${i}_${j}_res
+			3dfractionize -template $refFile -input tmp_${i}_${j}.nii.gz -prefix tmp_${i}_${j}_res
 			3dcalc -a tmp_${i}_${j}_res+tlrc -prefix tmp_${i}_${j}_bin -expr "step(a-3000)"
 			3dcopy tmp_${i}_${j}_bin+tlrc tmp_${i}_${j}_bin.nii.gz
 		done
@@ -119,11 +114,11 @@ done
 for i in ${!compList[@]}; do
 
 	pref=${compList[$i]}
-	scan=${pref}_stats_blur${blurInt}+tlrc
+	scan=${pref}_stats+tlrc
 	betas=${arrA[$i]},${arrB[$i]}
 
 	arrRem=(`cat ${grpDir}/info_rmSubj_${pref}.txt`)
-	print=${roiDir}/Betas_${pref}_sub_data.txt
+	print=${betaDir}/Betas_${pref}_sub_data.txt
 	> $print
 
 	for k in Mask*.HEAD; do
@@ -137,11 +132,6 @@ for i in ${!compList[@]}; do
 			MatchString $subj "${arrRem[@]}"
 
 			if [ $? == 1 ]; then
-
-				if [ ! -f ${j}/${scan}.HEAD ]; then
-					3dmerge -prefix ${j}/${scan%+*} -1blur_fwhm ${blurInt} -doall ${j}/${scan%_*}+tlrc
-				fi
-
 				stats=`3dROIstats -mask ${k%.*} "${j}/${scan}[${betas}]"`
 				echo "$subj $stats" >> $print
 			fi
@@ -152,7 +142,9 @@ for i in ${!compList[@]}; do
 done
 
 
+cd $betaDir
 > Master_list.txt
+
 for i in Betas*; do
 	echo $i >> Master_list.txt
 done

@@ -33,7 +33,7 @@ export OMP_NUM_THREADS=$SLURM_CPUS_ON_NODE
 #
 # 3) assumes that decon files exist locally (bring them back from the supercomputer)
 #
-# 4) Written for the output of ETAC - will pull betas for each appropriate blur from each cluster
+# 4) Written for the output of ETAC - will pull betas from each cluster
 
 
 
@@ -50,8 +50,6 @@ fileArr=(SpT1 SpT1pT2 T1 T1pT2 T2 T2fT1)							# decon files from which betas wi
 arrA=(1 7 1 7 1 1)													# sub-bricks corresponding to $fileArr
 arrB=(4 10 4 10 4 7)
 arrLen=${#arrA[@]}
-
-blurX=({2..4})														# blur mulitpliers from previous steps
 
 
 
@@ -73,18 +71,6 @@ if [ $test1 != $arrLen ] || [ $test2 != $arrLen ]; then
 fi
 
 
-# determine blur
-refFile=${refDir}/${fileArr[0]}_stats_REML+tlrc
-gridSize=`3dinfo -dk $refFile`
-int=`printf "%.0f" $gridSize`
-
-c=0; for i in ${blurX[@]}; do
-	hold="$(($int * $i))"
-	blurArr[$c]=$hold
-	let c=$[$c+1]
-done
-blurLen=${#blurArr[@]}
-
 
 
 ### make clusters, tables
@@ -102,11 +88,11 @@ for i in FINAL_*allP*.HEAD; do
 		-1tindex 0 -2thresh -0.5 0.5 -dxyz=1 \
 		-savemask Clust_${pref}_${blur}_mask \
 		1.01 5 $i > Clust_${pref}_${blur}_table.txt
+
+		mv Clust* $clustDir
 	fi
 done
 
-# organize
-mv Clust* $clustDir
 
 
 
@@ -117,67 +103,48 @@ c=0; while [ $c -lt $arrLen ]; do
 
 	hold=${fileArr[$c]}
 	betas=${arrA[$c]},${arrB[$c]}
-
-	# make subj list
-	unset subjHold
 	arrRem=(`cat ${grpDir}/info_rmSubj_${hold}.txt`)
-	for i in ${workDir}/s*; do
-		subj=${i##*\/}
-		MatchString "$subj" "${arrRem[@]}"
-		if [ $? == 1 ]; then
-			subjHold+="$subj "
-		fi
-	done
-	subjList=(${subjHold})
 
 
 	# split clust masks
-	d=0; while [ $d -lt $blurLen ]; do
+	if [ -f Clust_${hold}_mask+tlrc.HEAD ]; then
+		if [ ! -f Clust_${hold}_c1+tlrc.HEAD ]; then
 
-		blurInt=${blurArr[$d]}
+			3dcopy Clust_${hold}_mask+tlrc ${hold}.nii.gz
+			num=`3dinfo Clust_${hold}_mask+tlrc | grep "At sub-brick #0 '#0' datum type is short" | sed 's/[^0-9]*//g' | sed 's/^...//'`
 
-		if [ -f Clust_${hold}_b${blurInt}_mask+tlrc.HEAD ]; then
-			if [ ! -f Clust_${hold}_b${blurInt}_c1+tlrc.HEAD ]; then
+			for (( j=1; j<=$num; j++ )); do
+				if [ ! -f Clust_${hold}_c${j}+tlrc.HEAD ]; then
 
-				3dcopy Clust_${hold}_b${blurInt}_mask+tlrc ${hold}_b${blurInt}.nii.gz
-				num=`3dinfo Clust_${hold}_b${blurInt}_mask+tlrc | grep "At sub-brick #0 '#0' datum type is short" | sed 's/[^0-9]*//g' | sed 's/^...//'`
-
-				for (( j=1; j<=$num; j++ )); do
-					if [ ! -f Clust_${hold}_b${blurInt}_c${j}+tlrc.HEAD ]; then
-
-						c3d ${hold}_b${blurInt}.nii.gz -thresh $j $j 1 0 -o ${hold}_b${blurInt}_${j}.nii.gz
-						3dcopy ${hold}_b${blurInt}_${j}.nii.gz Clust_${hold}_b${blurInt}_c${j}+tlrc
-					fi
-				done
-				rm *.nii.gz
-			fi
-
-
-			# pull betas
-			for i in Clust_${hold}_b${blurInt}_c*+tlrc.HEAD; do
-
-				tmp=${i##*_}
-				cnum=${tmp%+*}
-				print=${outDir}/Betas_${hold}_b${blurInt}_${cnum}.txt
-				> $print
-
-				for j in ${subjList[@]}; do
-
-					subjDir=${workDir}/${j}
-					decon=stats_REML
-
-					# blur
-					if [ ! -f ${subjDir}/${hold}_${decon}_blur${blurInt}+tlrc.HEAD ]; then
-						3dmerge -prefix ${subjDir}/${hold}_${decon}_blur${blurInt} -1blur_fwhm $blurInt -doall ${subjDir}/${hold}_${decon}+tlrc
-					fi
-
-					file=${subjDir}/${hold}_${decon}_blur${blurInt}+tlrc
-					stats=`3dROIstats -mask $i "${file}[${betas}]"`
-					echo "$j $stats" >> $print
-				done
+					c3d ${hold}.nii.gz -thresh $j $j 1 0 -o ${hold}_${j}.nii.gz
+					3dcopy ${hold}_${j}.nii.gz Clust_${hold}_c${j}+tlrc
+				fi
 			done
+			rm *.nii.gz
 		fi
-		let d=$[$d+1]
-	done
+
+
+		# pull betas
+		for i in Clust_${hold}_b${blurInt}_c*+tlrc.HEAD; do
+
+			tmp=${i##*_}; cnum=${tmp%+*}
+			print=${outDir}/Betas_${hold}_${cnum}.txt
+			> $print
+
+			for j in ${workDir}/s*; do
+
+				subj=${i##*\/}
+				MatchString "$subj" "${arrRem[@]}"
+
+				if [ $? == 1 ]; then
+
+					file=${j}/${hold}_stats_REML+tlrc
+					stats=`3dROIstats -mask ${i%.*} "${file}[${betas}]"`
+					echo "$subj $stats" >> $print
+				fi
+			done
+		done
+	fi
+
 	let c=$[$c+1]
 done
