@@ -133,7 +133,7 @@ c=0; while [ $c -lt $arrLen ]; do
 
 			for j in ${workDir}/s*; do
 
-				subj=${i##*\/}
+				subj=${j##*\/}
 				MatchString "$subj" "${arrRem[@]}"
 
 				if [ $? == 1 ]; then
