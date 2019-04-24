@@ -85,7 +85,7 @@ if [ $runCount != $totBlock ]; then
 fi
 
 # check blips
-if [ blip == 1 ]; then
+if [ $blip == 1 ]; then
 	blipCount=`ls *phase*.nii.gz | wc -l`
 	if [ $blipCount != $phaseLen ]; then
 		echo "Number of blips != number of phases. Exit 3" >&2
@@ -231,7 +231,7 @@ fi
 
 for j in ${block[@]}; do
 
-	if [ blip == 1 ]; then
+	if [ $blip == 1 ]; then
 		input=${j}_blip+orig
 	else
 		input=${j}+orig
@@ -344,7 +344,7 @@ gridSize=`3dinfo -di ${block[0]}+orig`
 for j in ${block[@]}; do
 	if [ ! -f tmp_${j}_mask_warped+tlrc.HEAD ]; then
 
-		if [ blip == 1 ]; then
+		if [ $blip == 1 ]; then
 			input=${j}_blip+orig
 		else
 			input=${j}+orig
