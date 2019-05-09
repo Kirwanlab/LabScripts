@@ -125,7 +125,7 @@ c=0; while [ $c -lt $arrLen ]; do
 
 
 		# pull betas
-		for i in Clust_${hold}_b${blurInt}_c*+tlrc.HEAD; do
+		for i in Clust_${hold}_c*+tlrc.HEAD; do
 
 			tmp=${i##*_}; cnum=${tmp%+*}
 			print=${outDir}/Betas_${hold}_${cnum}.txt
