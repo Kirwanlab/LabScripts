@@ -82,7 +82,7 @@ for i in ${deconList[@]}; do
 	arrLen=${#arrSubj[@]}
 
 	c=0; while [ $c -lt $arrLen ]; do
-		if [ $(echo ${arrNum[$c]}'>'$max | bc) == 1 ] || [ $(echo ${arrPrp[$c]}'>'$maxP | bc) == 1 ]; then
+		if [ $(echo ${arrNum[$c]}'>'$max | bc) == 1 ] && [ $(echo ${arrPrp[$c]}'>'$maxP | bc) == 1 ]; then
 
 			echo ${arrSubj[$c]} >> $print2
 		fi
