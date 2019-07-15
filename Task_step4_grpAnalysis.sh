@@ -50,7 +50,7 @@ export OMP_NUM_THREADS=$SLURM_CPUS_ON_NODE
 #			arrA=(1 2 3)
 #			arrB=(11 22 33)
 #			arrC=(111 222 333)
-#			listX=ABC
+#			wsArr=ABC
 #
 #			then for the "first" comparison, you would get 1v11, 1v111, and 11v111
 #			and for the "second" comparison, you would get 2v22, 2v222, and 22v222, etc.
@@ -65,7 +65,7 @@ export OMP_NUM_THREADS=$SLURM_CPUS_ON_NODE
 #			arrA=(1 2 3)
 #			arrB=(11 22 33)
 #			arrC=(111 222 333)
-#			listX=ABC
+#			wsArr=ABC
 #			bsArr=(Con Aut)
 #
 #			then for the "third" comparison, you would get 2(Con, Aut) x 3(3,33,333) comparison
@@ -108,7 +108,7 @@ compLen=${#compList[@]}
 arrA=(1 7 1 7 1 1)											# setA beh sub-brik for compList. Must be same length as compList
 arrB=(4 10 4 10 4 7)										# setB
 #arrC=(39 59 65)
-listX=AB													# list of arr? used, for building permutations (e.g. listX=ABC)
+wsArr=AB													# list of within-subject arrays used (arrA, arrB, etc), for building permutations (e.g. wsArr=ABC)
 
 namA=(RpH RpFH Hit FpH Hit HpH)								# names of behaviors from arrA. Must be same length as arrA
 namB=(RpF RpFF FA  FpF FA  FpH)
@@ -116,24 +116,13 @@ namB=(RpF RpFF FA  FpF FA  FpH)
 
 
 # ETAC arrs
-blurX=({2..4})    											# blur multipliers (integer)
+blurX=({1..4})    											# blur multipliers (integer)
 pval_list=(0.01 0.005 0.001)								# p-value thresholds
 
 
 # MVM vars/arrs
 blurM=2														# blur multiplier, float/int
 bsArr=(OCD Con)												# Bx-subject variables (groups)
-
-cd $workDir
-for i in s*; do
-	tmp=${i/sub-}; group=${tmp%??}
-	if [ $group == 1 ]; then
-		echo -e "$i \t Con" >> ${outDir}/Group_list.txt;
-	elif [ $group == 3 ]; then
-		echo -e "$i \t OCD" >> ${outDir}/Group_list.txt;
-	fi
-done
-
 bsList=${outDir}/Group_list.txt								# Needed when bsArr > 1. List where col1 = subj identifier, col2 = group membership (e.g. s1295 Con)
 
 
@@ -209,9 +198,9 @@ if [ ! ${afniVer:7} -ge 18315 ]; then
 fi
 
 # make permutation lists
-arr=(`MakePerm $listX`)
+arr=(`MakePerm $wsArr`)
 alpha=(`echo {A..Z}`)
-wsList=(${alpha[@]:0:${#listX}})
+wsList=(${alpha[@]:0:${#wsArr}})
 
 
 for ((a=0; a<${#bsArr[@]}; a++)); do
@@ -239,7 +228,13 @@ if [ $runIt == 1 ]; then
 	if [ ! -f Group_epi_mask.nii.gz ] && [ ! -f etac_extra/Group_epi_mask.nii.gz ]; then
 
 		for i in ${workDir}/s*; do
-			list+="${i}/mask_epi_anat+tlrc "
+
+			subj=${i##*\/}
+			MatchString "$subj" "${arrRem[@]}"
+
+			if [ $? == 1 ]; then
+				list+="${i}/mask_epi_anat+tlrc "
+			fi
 		done
 
 		3dMean -prefix ${outDir}/Group_epi_mean.nii.gz $list
@@ -452,7 +447,7 @@ fi
 
 if [ $doMVM == 1 ]; then
 
-	if [ ${#listX} -lt 3 ] && [ ${#bsArr[@]} == 1 ]; then
+	if [ ${#wsArr} -lt 3 ] && [ ${#bsArr[@]} == 1 ]; then
 		echo >&2
 		echo "Replace user and try again - don't use ACF for a pairwise comparison. Exit 6" >&2
 		echo >&2
