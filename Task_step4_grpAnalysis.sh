@@ -517,6 +517,8 @@ if [ $doMVM == 1 ]; then
 
 
 		# set up - determine/construct variables for script
+		scan=${pref}_stats_REML_blur${blurInt}+tlrc
+		
 		unset conVar gltCount dataFrame
 
 		if [ ${#bsArr[@]} -gt 1 ]; then
@@ -555,8 +557,6 @@ if [ $doMVM == 1 ]; then
 			# determine group membership, write dataframe
 			bsSubj=(`cat $bsList | awk '{print $1}'`)
 			bsGroup=(`cat $bsList | awk '{print $2}'`)
-
-			scan=${pref}_stats_REML_blur${blurInt}+tlrc
 
 			for m in ${subjList[@]}; do
 				for n in ${!bsSubj[@]}; do
