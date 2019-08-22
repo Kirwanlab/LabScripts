@@ -49,7 +49,7 @@ roiDir=${parDir}/Analyses/roiAnalysis
 betaDir=${roiDir}/sub_betas
 grpDir=${parDir}/Analyses/grpAnalysis
 priorDir=~/bin/Templates/vold2_mni/priors_HipSeg
-refDir=${workDir}/sub-1295
+refFile=${workDir}/sub-1295/decon_stats_REML+tlrc
 
 
 # decon vars
