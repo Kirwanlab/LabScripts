@@ -1,6 +1,7 @@
 #!/bin/bash
 
 
+
 # Written by Nathan Muncy on 9/7/19
 
 # --- Notes
@@ -11,22 +12,30 @@
 # to write out event files in rawdata/sub-123/func.
 #
 # 3) It is currently only written for fixed durations, an update will follow 
-#at some point for a variable duration.
-
+# at some point for a variable duration.
+#
+# 4) TimingNames is only used for 1D files. List these behaviors in the same order that bash would list the timing files. E.g.:
+#
+#		TimingNames=(Hit Miss) would correspond to
+#		behVect.01.1D (Hit) and behVect.02.1D (Miss)
+#
+# 5) Naming for txt files should be embedded in the file name. E.g. sub-1234_TF_Hit_All.txt
+#		Determining behavior ($beh) for txt files is currently written for Temporal timing files named like the previous example
+#
+# 6) Assumes that the only files in derivatives/sub-1234/timing_files are the 1D/txt timing files
 
 
 
 ###??? update here
-parDir=/Volumes/Yorick/Exercise
+parDir=~/compute/Temporal/Experiment3			# research directory
 derivDir=${parDir}/derivatives
 rawDir=${parDir}/rawdata
 
 
-tf1d=1		   								# toggle for whether timing files are .1D (1) or .txt (0)
-TFstring=behvect_correct 					# prefix string for timing files
-tfNames=(CR Hit LureFA LureCR Other) 		# behaviors corresponding to timing files (ref Task_step2 NotLazy section)
-taskName=mst								# name of task (ref Task_step0)
-duration=3.5								# duration of trial (ref Task_step2)
+taskName=Temporal								# name of task (ref Task_step0)
+duration=										# duration of trial (ref Task_step2). Leave empty of duration varies (e.g. 1:1.3 5:0.8)
+suffix=txt		   								# suffix of timing file (1D or txt)
+TimingNames=(CR Hit LureFA LureCR Other) 		# behaviors corresponding to 1D timing files (ref Task_step2 NotLazy section)
 
 
 
@@ -37,18 +46,9 @@ duration=3.5								# duration of trial (ref Task_step2)
 # Writes a sorted timing file for each run in BIDs format
 
 
-# determine TF suffix
-if [ $tf1d == 1 ]; then
-	suffix=1D
-else
-	suffix=txt
-fi
-
-
-# work
 cd $rawDir
 
-for i in s*; do
+for i in sub-*; do
 
 	# Set subj paths
 	tfPath=${derivDir}/${i}/timing_files
@@ -57,20 +57,13 @@ for i in s*; do
 
 	# Determine number of runs, timing files, timing file rows
 	epiCount=`ls ${rawPath}/*task*.nii.gz | wc -l`
-
-	tfArr=(`ls ${tfPath}/${TFstring}*.$suffix | sed 's/.*\///'`)
+	tfArr=(`ls ${tfPath}/*.$suffix | sed 's/.*\///'`)
 	tfRow=`cat ${tfPath}/${tfArr[0]} | wc -l`
-
 
 	# Check
 	if [ $epiCount != $tfRow ]; then
 		echo "Unequal number of EPI runs and rows of timing files for $i. Exit 1" >&2
 		exit 1
-	fi
-
-	if [ ${#tfNames[@]} != ${#tfArr[@]} ]; then
-		echo "Unequal number of Behaviors (\$tfNames) and Timing Files for $i. Exit 2" >&2
-		exit 2
 	fi
 
 
@@ -81,14 +74,30 @@ for i in s*; do
 		tmpFile=${rawPath}/tmp_event_run-${j}.txt
 		> $tmpFile
 
-		# extract row from each TF, write it to $tmpFile & add beh, duration
+		## extract row from each TF, write it to $tmpFile & add beh, duration
 		c=0; while [ $c -lt ${#tfArr[@]} ]; do
 
-			beh=${tfNames[$c]}
-			holdArr=(`sed "${j}q;d" ${tfPath}/${tfArr[$c]}`)
+			# determine behavior from $TimingNames or txt file name
+			if [ $suffix == 1D ]; then
+				beh=${TimingNames[$c]}
+			elif [ $suffix == txt ]; then
+				tmp=${tfArr[$c]#*TF_}; beh=${tmp%_*}								### This is for Temporal timing files
+			fi
 
+			# pull values from row $j of timing file
+			holdArr=(`sed "${j}q;d" ${tfPath}/${tfArr[$c]}`)
 			for k in ${holdArr[@]}; do
-				echo -e "${k}\t${duration}\t$beh" >> $tmpFile
+
+				# determine start, duration
+				if [ -z $duration ]; then
+					start=${k%\:*}
+					dur=${k#*\:}
+				else
+					start=$k
+				fi
+
+				# write columns
+				echo -e "${start}\t${dur}\t$beh" >> $tmpFile
 			done
 
 			let c=$[$c+1]
