@@ -94,6 +94,7 @@ for i in sub-*; do
 					dur=${k#*\:}
 				else
 					start=$k
+					dur=$duration
 				fi
 
 				# write columns
