@@ -63,15 +63,17 @@ done
 ### Write dataset_description.json
 # This will request input
 
-echo -e "\nNote: title below must be supplied in quotations"
-echo -e "\te.g. \"This is my title\"\n"
-read -p 'Please enter title of the manuscript:' title
+if [ ! -s ${workDir}/rawdata/dataset_description.json ]; then
 
-echo -e "\n\nNote: authors must be within quotes and separated by a comma & space"
-echo -e "\te.g. \"Nate Muncy\", \"Brock Kirwan\"\n"
-read -p 'Please enter authors:' authors
+	echo -e "\nNote: title below must be supplied in quotations"
+	echo -e "\te.g. \"This is my title\"\n"
+	read -p 'Please enter title of the manuscript:' title
 
-cat > ${workDir}/rawdata/dataset_description.json << EOF
+	echo -e "\n\nNote: authors must be within quotes and separated by a comma & space"
+	echo -e "\te.g. \"Nate Muncy\", \"Brock Kirwan\"\n"
+	read -p 'Please enter authors:' authors
+
+	cat > ${workDir}/rawdata/dataset_description.json << EOF
 {
 	"Name": $title,
 	"BIDSVersion": "1.1.1",
@@ -79,7 +81,7 @@ cat > ${workDir}/rawdata/dataset_description.json << EOF
 	"Authors": [$authors]
 }
 EOF
-
+fi
 
 
 
