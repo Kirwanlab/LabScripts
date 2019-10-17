@@ -3,7 +3,6 @@
 #SBATCH --time=40:00:00   # walltime
 #SBATCH --ntasks=10   # number of processor cores (i.e. tasks)
 #SBATCH --nodes=1   # number of nodes
-#SBATCH -C 'rhel7'   # RHEL 7
 #SBATCH --mem-per-cpu=10gb   # memory per CPU core
 #SBATCH -J "TS4"   # job name
 
@@ -518,7 +517,7 @@ if [ $doMVM == 1 ]; then
 
 		# set up - determine/construct variables for script
 		scan=${pref}_stats_REML_blur${blurInt}+tlrc
-		
+
 		unset conVar gltCount dataFrame
 
 		if [ ${#bsArr[@]} -gt 1 ]; then
@@ -603,7 +602,7 @@ if [ $doMVM == 1 ]; then
 
 
 		# write script
-		echo "module load r/3/5
+		echo "module load r/3.6
 
 			3dMVM -prefix $outPre \\
 			-jobs 10 \\

@@ -3,7 +3,6 @@
 #SBATCH --time=20:00:00   # walltime
 #SBATCH --ntasks=10   # number of processor cores (i.e. tasks)
 #SBATCH --nodes=1   # number of nodes
-#SBATCH -C 'rhel7'   # RHEL 7
 #SBATCH --mem-per-cpu=6gb   # memory per CPU core
 #SBATCH -J "PPI5"   # job name
 
@@ -152,7 +151,7 @@ for i in s*; do
 
 		cd $i
 		for j in PPI*stats_REML+tlrc.HEAD; do
-			
+
 			file=${j%+*}
 			if [ ! -f ${file}_blur${blurInt}+tlrc.HEAD ]; then
 				3dmerge -prefix ${file}_blur${blurInt} -1blur_fwhm $blurInt -doall ${j%.*}
@@ -364,7 +363,7 @@ for i in ${ppiList[@]}; do
 	tmp2=${i#*_}
 	finalOut=${tmp2%_stat*}
 
-	echo " module load r/3/5
+	echo " module load r/3.6
 
 	3dMVM -prefix MVM_${finalOut} -jobs 10 -mask $mask \\
 	-bsVars 'Group*Snif+Group*SPA' \\

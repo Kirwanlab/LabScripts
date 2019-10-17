@@ -3,7 +3,6 @@
 #SBATCH --time=30:00:00   # walltime
 #SBATCH --ntasks=6   # number of processor cores (i.e. tasks)
 #SBATCH --nodes=1   # number of nodes
-#SBATCH -C 'rhel7'   # RHEL 7
 #SBATCH --mem-per-cpu=8gb   # memory per CPU core
 #SBATCH -J "PPI2"   # job name
 

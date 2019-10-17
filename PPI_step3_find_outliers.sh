@@ -19,7 +19,7 @@
 
 
 
-module load r/3/5
+module load r/3.6
 
 
 ###??? update these
