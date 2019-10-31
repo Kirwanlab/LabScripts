@@ -550,6 +550,16 @@ if [ $doMVM == 1 ]; then
 
 					conVar+="-gltLabel $gltCount ${bsLab}_${name1}-${name2} -gltCode $gltCount '${bsVars}: $bsCon WSVARS: 1*$name1 -1*$name2' "
 				done
+
+				# pairwise posthocs for each WS factor, for BS comparisons
+				arrWS=(`echo $wsArr | fold -w1`)
+				for z in ${arrWS[@]}; do
+
+					gltCount=$[$gltCount+1]
+					eval declare -a nam=(nam${z})
+					name=$(eval echo \${${nam}[$arrCount]})
+					conVar+="-gltLabel $gltCount ${bsLab}_$name -gltCode $gltCount '${bsVars}: $bsCon WSVARS: 1*$name' "
+				done
 			done
 
 
