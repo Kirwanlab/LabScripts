@@ -342,7 +342,7 @@ c=0; count=0; while [ $c -lt $phaseLen ]; do
 		else
 
 			holdName=($(eval echo \${nam${out}[@]}))
-			GenDecon $phase ${blockArr[$c]} ${deconTiming[$count]} ${deconLen[$c]} "$input" $out ${#holdName[@]}
+			GenDecon $phase ${blockArr[$c]} ${deconTiming[$count]} ${deconLen[$c]} "$input" $out ${holdName[@]}
 		fi
 
 		# run script
