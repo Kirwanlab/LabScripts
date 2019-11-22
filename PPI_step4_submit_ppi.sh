@@ -15,12 +15,10 @@ cd $workDir
 
 for i in sub*; do
 
-	[ $i == sub-1048 ]; clean=$?
-
     sbatch \
     -o ${outDir}/output_PPI4_${i}.txt \
     -e ${outDir}/error_PPI4_${i}.txt \
-    ${scriptDir}/PPI_step4_sbatch_ppi.sh $i $clean
+    ${scriptDir}/PPI_step4_sbatch_ppi.sh $i
 
     sleep 1
 done

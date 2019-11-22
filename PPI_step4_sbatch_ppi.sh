@@ -534,18 +534,3 @@ c=0; while [ $c -lt $phaseLen ]; do
 	done
 	let c=$[$c+1]
 done
-
-
-
-
-# clean
-if [ $cleanMode == 1 ]; then
-	rm tmp_*
-	rm -r a*
-	rm final_mask_{CSF,GM}*
-	rm *corr_brain*
-	rm *gmean_errts*
-	rm *volreg*
-	rm Temp*
-	rm full_mask.*
-fi
