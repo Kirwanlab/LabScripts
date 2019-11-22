@@ -41,7 +41,6 @@ export OMP_NUM_THREADS=$SLURM_CPUS_ON_NODE
 
 
 subj=$1
-testMode=$2
 
 
 ### --- Experimenter input --- ###
@@ -522,19 +521,4 @@ if [ $runDecons == 1 ]; then
 			rm *ss_review*
 		done
 	done
-fi
-
-
-
-# clean
-if [ $testMode == 1 ]; then
-	rm tmp_*
-	rm -r a*
-	rm final_mask_{CSF,GM}*
-	rm *corr_brain*
-	rm *gmean_errts*
-	rm *volreg*
-	rm Temp*
-	rm *WMe_rall*
-	rm full_mask.*
 fi

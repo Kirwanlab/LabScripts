@@ -15,12 +15,10 @@ mkdir -p $outDir
 cd ${workDir}/derivatives
 for i in sub*; do
 
-	[ $i == sub-1295 ]; test=$?
-
     sbatch \
     -o ${outDir}/output_TS2_${i}.txt \
     -e ${outDir}/error_TS2_${i}.txt \
-    ${scriptDir}/Task_step2_sbatch_regress.sh $i $test
+    ${scriptDir}/Task_step2_sbatch_regress.sh $i
 
     sleep 1
 done
