@@ -50,7 +50,6 @@ timingDir=${workDir}/derivatives/TimingFiles
 subj=$1
 string=${subj#*-}
 ppiDir=${workDir}/derivatives/${subj}
-cleanMode=$2
 
 
 ## Deconvolution variables												# Prefix of decons run in step2
