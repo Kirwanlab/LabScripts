@@ -1,30 +1,35 @@
 #!/bin/bash
 
 
-# written by Nathan Muncy on 11/7/17
+# written by Nathan Muncy on 12/3/19
 
 
-### Wrapper script for RestingState_step1_sbatch_preproc.sh
+parDir=~/compute/MNI_NREM/MRI_processed			###??? update this
+rawDir=${parDir}/rawdata
+workDir=${parDir}/derivatives
+scriptDir=${parDir}/code
 
+phaseArr=(Sleep Wake)							###??? phases of experiment, corresponds to sessions (ses-Sleep, ses-Wake). Required
 
-workDir=~/compute/MNI_RDoC/MRI_processed
-scriptDir=${workDir}/Scripts
-
-# Create output dir for trouble shooting
 slurmDir=${workDir}/Slurm_out
 time=`date '+%Y_%m_%d-%H_%M_%S'`
-outDir=${slurmDir}/resting_${time}
+outDir=${slurmDir}/RS1_${time}
+
 mkdir -p $outDir
 
 
-cd $workDir
+cd $rawDir
 
-for i in P*; do
+for i in s*; do
+	for j in ${phaseArr[@]}; do
+		if [ ! -f ${workDir}/${i}/ses-${j}/Resting_${j}_scale+tlrc.HEAD ]; then
 
-    sbatch \
-    -o ${outDir}/output_resting_${i}.txt \
-    -e ${outDir}/error_resting_${i}.txt \
-    ${scriptDir}/RestingState_step1_sbatch_preproc.sh $workDir $i
+		    sbatch \
+		    -o ${outDir}/output_RS1_${i}_${j}.txt \
+		    -e ${outDir}/error_RS1_${i}_${j}.txt \
+		    ${scriptDir}/RS_step1_sbatch_preproc.sh $i $j
 
-    sleep 1
+		    sleep 1
+		fi
+	done
 done

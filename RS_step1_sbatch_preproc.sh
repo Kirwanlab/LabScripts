@@ -1,10 +1,10 @@
 #!/bin/bash
 
-#SBATCH --time=90:00:00   # walltime
+#SBATCH --time=20:00:00   # walltime
 #SBATCH --ntasks=6   # number of processor cores (i.e. tasks)
 #SBATCH --nodes=1   # number of nodes
-#SBATCH --mem-per-cpu=16gb   # memory per CPU core
-#SBATCH -J "RSF"   # job name
+#SBATCH --mem-per-cpu=8gb   # memory per CPU core
+#SBATCH -J "RS1"   # job name
 
 # Compatibility variables for PBS. Delete if not needed.
 export PBS_NODEFILE=`/fslapps/fslutils/generate_pbs_nodefile`
@@ -18,363 +18,444 @@ export OMP_NUM_THREADS=$SLURM_CPUS_ON_NODE
 
 
 
-
-# This is derived from afni_proc.py: Example 10
-# Written by Nathan Muncy on 11/7/17
-# Bandpass regressor file creation and inclusion in regression added by Ty Bodily on 1/23/18
-
-# Notes:
-# 1. This assumes that functional files exist in NIfTI format (Resting.nii.gz), uses this header data
-#       to determine TR count and voxel size
-#
-# 2. Uses AFNI, FSL, c3d, and ANTs commands
-#
-# 3. Is built to render ROI (JLF) or coordinate seeds
-#
-# 4. Assumes that the relevant JLF/ACT priors exist in the template dir
-#
-# 5. This script starts with aw 3D struct and 4D RS files, and finishes with seed-based correlation matrices (FINAL_*, Pearson's R).
-#
-# 6. For seeds, the script will name each input (e.g. roiName corresponds to roiList). These two arrays must have an equal length.
+# written by Nathan Muncy on 12/3/19
 
 
+###--- Notes
+#
+# This script does basic pre-processing for resting state data
+#
+# Major steps following the comment ### --- Foo --- ###,
+# minor steps are also annotated
+#
+# Sections ###??? require research attention
+#
+# Phase = session
+#
+# Researcher Input A) location of parent directory
+# Researcher Input B) a bold file in rawdata
+# Researcher Input C) verify name of bold file in rawdata
+# Researcher Input D) this was written for a sleep study, where a T1-weighted file only exists for one session. Update accordingly
 
-### Set variables
-# General variables
-tempDir=~/bin/Templates/vold2_mni    # Location of template/priors
+
+
+
+
+subj=$1
+phase=$2	# required
+
+
+### --- Set Variables --- ###
+
+parDir=~/compute/MNI_NREM/MRI_processed								###??? Research Input A
+workDir=${parDir}/derivatives/${subj}/ses-$phase 					# subject, session directory
+rawDir=${parDir}/rawdata/$subj 										# location of subject raw data
+refFile=${parDir}/rawdata/sub-021/ses-Sleep/func/sub-021_RS_run-Sleep_bold.nii.gz		###??? Research Input B
+
+blip=0																# if blip data exists (1=on)
+multiBand=1															# if vibration is present from MB protocol (1=on)
+
+# Location of template/priors
+tempDir=~/bin/Templates/vold2_mni
+template=${tempDir}/vold2_mni_brain+tlrc
 actDir=${tempDir}/priors_ACT
-jlfDir=${tempDir}/priors_JLF
-scriptDir=~/compute/Scripts    # Location of antify script
-
-
-# Subject variables
-workDir=${1}/$2
-
-
-# Priors for WM/CSF masks
-priorList=(3 0015 0014 0004 0043)
-labelList=(WM 4ven 3ven LLven RLven)
-arrLen=${#labelList[@]}
-
-
-
-### Study-specific variables
-# JLF seeds
-roiList=(2025)
-roiName=(jlf_PCC)
-roiLen=${#roiList[@]}
-
-# Coordinate seeds
-coordList=("5 -55 25" "-40 22 38" "-30 -52 54" "-26 -72 -14" "8 -78 -6")
-coordName=(rPCC lMFG lPar lLing rLing)
-coordLen=${#coordList[@]}
-seedSize=5      # Size (mm) of radius
-
-# Flags
-jlfFlag=0
-corFlag=0
-blurFlag=0
 
 
 
 
-### Make it happen
+### --- Set up --- ###
+#
+# Run checks to make sure the script is set up correctly,
+# and copy data from rawdata
+
+
+# Check
+for i in {1..4}; do
+	if [ ! -f ${actDir}/Prior${i}.nii.gz ]; then
+		echo >&2
+		echo "Prior${i} not detected. Check \$actDir. Exit 1" >&2
+		echo >&2
+		exit 1
+	fi
+done
+
+if [ ! -f ${template}.HEAD ]; then
+	echo >&2
+	echo "Template not detected. Check \$tempDir. Exit 2" >&2
+	echo >&2
+	exit 2
+fi
+
+
+# Copy Data
+mkdir -p $workDir
+
+if [ ! -f ${workDir}/Resting_${phase}+orig.HEAD ]; then
+	3dcopy ${rawDir}/ses-${phase}/func/${subj}_RS_run-${phase}_bold.nii.gz ${workDir}/Resting_${phase}+orig 	###??? Researcher Input C
+fi
+
+if [ ! -f ${workDir}/struct+orig.HEAD ]; then
+	3dcopy ${rawDir}/ses-Sleep/anat/${subj}_T1w.nii.gz ${workDir}/struct+orig 					###??? Researcher Input D
+
+fi
+
+if [ ! -f ${workDir}/Resting_${phase}+orig.HEAD ] || [ ! -f ${workDir}/struct+orig.HEAD ]; then
+	echo >&2
+	echo "Func and/or Anat data not detected in $workDir. Check $rawDir. Exit 3" >&2
+	echo >&2
+	exit 3
+fi
+
+
+
+
+### --- Blip --- ###
+#
+# Correct for signal fallout in OFC by using data from an opposite phase encoding (Rev).
+# Find median datasets, compute midpoints, warp median datasets,
+# warp EPI timeseries
+
+
 cd $workDir
 
-# Get outlier info
-if [ ! -f outcount_Resting.1D ]; then
+# build outcount list
+tr_counts=`3dinfo -ntimes Resting_${phase}+orig`
+gridSize=`3dinfo -di Resting_${phase}+orig`
+checkSize=`3dinfo -di $refFile`
 
-    3dcopy Resting.nii.gz Resting+orig
-    3dToutcount -automask -fraction -polort 5 -legendre Resting+orig > outcount_Resting.1D
-    1deval -a outcount_Resting.1D -expr "1-step(a-0.1)" > outcount_censor.1D
+
+## patch for FOV problem: verify voxel dim, resample if needed
+if [ $gridSize != $checkSize ]; then
+
+	3dcopy Resting_${phase}+orig Resting_origRes_${phase} && rm Resting_${phase}+orig*
+	3dresample -master $refFile -rmode NN -input Resting_origRes_${phase}+orig -prefix Resting_${phase}
+	gridSize=`3dinfo -di Resting_${phase}+orig`
+fi
+
+# check
+if [ $gridSize != $checkSize ]; then
+	echo >&2
+	echo "Voxel dimensionality not correct. Exiting 4" >&2
+	echo >&2; exit 4
 fi
 
 
+# do blip
+if [ $blip == 1 ]; then
+	if [ ! -f Resting_${phase}_noBlip+orig.HEAD ]; then
 
-# Get var info
-tr_count=`fslhd Resting.nii.gz | grep "dim4" | awk 'FNR == 1 {print $2}'`
-minindex=`3dTstat -argmin -prefix - outcount_Resting.1D\'`
-ovals=(`1d_tool.py -set_run_lengths $tr_count -index_to_run_tr $minindex`)
+		# medain blip
+		3dTcat -prefix tmp_blip ${rawDir}/ses-${phase}/func/${subj}_task-restblip_bold.nii.gz
+		3dTstat -median -prefix tmp_blip_med tmp_blip+orig
+		3dAutomask -apply_prefix tmp_blip_med_masked tmp_blip_med+orig
 
-minoutrun=${ovals[0]}
-minouttr=${ovals[1]}
 
+		# median rs epi
+		3dcopy Resting_${phase}+orig Resting_${phase}_noBlip+orig && rm Resting_${phase}+orig.*
 
+		3dTcat -prefix tmp_all Resting_${phase}_noBlip+orig
+		3dTstat -median -prefix tmp_all_med tmp_all+orig
+		3dAutomask -apply_prefix tmp_all_med_masked tmp_all_med+orig
 
-# Despike, get min outlier volume, volreg
-if [ ! -f volreg_Resting+orig.HEAD ]; then
 
-    3dDespike -NEW -nomask -prefix despike_Resting Resting+orig
-    3dbucket -prefix min_outlier_volume despike_Resting+orig"[$minouttr]"     # new base for volreg
-    3dvolreg -zpad 1 -base min_outlier_volume+orig -1Dfile dfile_Resting.1D -prefix volreg_Resting -cubic despike_Resting+orig
-fi
+		# compute midpoint
+		3dQwarp -plusminus -pmNAMES Rev Task \
+			-pblur 0.05 0.05 -blur -1 -1 \
+			-noweight -minpatch 9 \
+			-source tmp_blip_med_masked+orig \
+			-base tmp_all_med_masked+orig \
+			-prefix tmp_warp
 
 
+		# warp median dsets/masks
+		3dNwarpApply -quintic -nwarp tmp_warp_Task_WARP+orig \
+			-source tmp_all_med+orig \
+			-prefix tmp_all_NWA
 
-# Construct motion files
-if [ ! -f censor_combined_2.1D ]; then
+		3drefit -atrcopy tmp_all+orig IJK_TO_DICOM_REAL tmp_all_NWA+orig
 
-    1d_tool.py -infile dfile_Resting.1D -set_nruns 1 -demean -write motion_demean.1D
-    1d_tool.py -infile dfile_Resting.1D -set_nruns 1 -derivative -demean -write motion_deriv.1D
-    1d_tool.py -infile dfile_Resting.1D -set_nruns 1 -show_censor_count -censor_prev_TR -censor_motion 0.2 motion  # more conservative threshold should be used for RSfunc
-    1deval -a motion_censor.1D -b outcount_censor.1D -expr "a*b" > censor_combined_2.1D
-fi
+		3dNwarpApply -quintic -nwarp tmp_warp_Task_WARP+orig \
+			-source tmp_all_med_masked+orig \
+			-prefix tmp_all_med_Task_masked
 
+		3drefit -atrcopy tmp_all+orig IJK_TO_DICOM_REAL tmp_all_med_Task_masked+orig
 
 
-# ANTs reg
-dim=3
-out=ants_
-fix=${tempDir}/vold2_mni_head.nii.gz
-mov=struct_rotated.nii.gz
+		# warp EPI
+		3dNwarpApply -quintic -nwarp tmp_warp_Task_WARP+orig \
+			-source Resting_${phase}_noBlip+orig \
+			-prefix Resting_${phase}+orig
 
-if [ ! -f ants_0GenericAffine.mat ]; then
-
-    3dWarp -oblique_parent volreg_Resting+orig -prefix $mov struct_raw.nii.gz
-
-    antsRegistrationSyN.sh \
-    -d $dim \
-    -f $fix \
-    -m $mov \
-    -o $out
-fi
-
-
-
-# Antify
-if [ ! -f volreg_Resting_ANTS_resampled+tlrc.HEAD ]; then
-    ${scriptDir}/antifyFunctional_nate.sh -a $out -t $fix -i volreg_Resting+orig
-fi
-
-
-
-# Get masks, resample
-if [ ! -f mask_WM+tlrc.HEAD ]; then
-    c=0; while [ $c -lt $arrLen ]; do
-
-        if [ ${priorList[$c]} == 3 ]; then
-            prior=${actDir}/Prior${priorList[$c]}.nii.gz
-        else
-            prior=${jlfDir}/label_${priorList[$c]}.nii.gz
-        fi
-
-        name=mask_${labelList[$c]}.nii.gz
-        3dWarp -oblique_parent volreg_Resting_ANTS_resampled+tlrc -prefix tmp_$name -gridset volreg_Resting_ANTS_resampled+tlrc -quintic $prior
-
-    let c=$[$c+1]
-    done
-
-
-    c3d tmp*ven.nii.gz -accum -add -endaccum -o tmp_mask_CSF.nii.gz
-
-    for a in tmp_mask_{WM,CSF}; do
-
-        3dcopy ${a}.nii.gz ${a}+tlrc
-        3dcalc -a ${a}+tlrc -prefix ${a#*_}+tlrc -expr "ispositive(a-0.5)"
-
-    done
-    rm tmp*
-fi
-
-
-
-# Tissue-class TimeSeries
-if [ ! -f tissClass_WM.1D ]; then
-    for j in CSF WM; do
-        3dmaskave -quiet -mask mask_${j}+tlrc volreg_Resting_ANTS_resampled+tlrc | 1d_tool.py -infile - -demean -write tissClass_${j}.1D
-    done
-fi
-
-
-
-# Note non-censored TRs
-ktrs=`1d_tool.py -infile censor_combined_2.1D -show_trs_uncensored encoded`
-
-
-
-# get exclusion mask
-if [ ! -f full_mask+tlrc.HEAD ]; then
-
-    cp ${actDir}/Template_BrainCerebellumBinaryMask.nii.gz ./brain_mask.nii.gz
-    3dfractionize -template volreg_Resting_ANTS_resampled+tlrc -input brain_mask.nii.gz -prefix full_mask
-fi
-
-
-
-#create bandpass regressor 1d file. Period from .008 to .08 Hz spans 12.5-125 s.
-1dBport -nodata $tr_count -band 0.008 0.08 -nozero -invert > bandpass_rall.1D
-
-
-
-
-# Deconvolve - remove noise from data
-if [ ! -f errts+tlrc.HEAD ]; then
-
-    3dDeconvolve -input volreg_Resting_ANTS_resampled+tlrc \
-    -mask full_mask+tlrc \
-    -censor censor_combined_2.1D \
-    -ortvec tissClass_WM.1D tiss.WM \
-    -ortvec tissClass_CSF.1D tiss.CSF \
-    -ortvec bandpass_rall.1D bandpass \
-    -polort A \
-    -num_stimts 12 \
-    -stim_file 1  motion_demean.1D'[0]' -stim_base 1  -stim_label 1 roll_01  \
-    -stim_file 2  motion_demean.1D'[1]' -stim_base 2  -stim_label 2 pitch_01 \
-    -stim_file 3  motion_demean.1D'[2]' -stim_base 3  -stim_label 3 yaw_01   \
-    -stim_file 4  motion_demean.1D'[3]' -stim_base 4  -stim_label 4 dS_01    \
-    -stim_file 5  motion_demean.1D'[4]' -stim_base 5  -stim_label 5 dL_01    \
-    -stim_file 6  motion_demean.1D'[5]' -stim_base 6  -stim_label 6 dP_01    \
-    -stim_file 7  motion_deriv.1D'[0]'  -stim_base 7  -stim_label 7 roll_02  \
-    -stim_file 8  motion_deriv.1D'[1]'  -stim_base 8  -stim_label 8 pitch_02 \
-    -stim_file 9  motion_deriv.1D'[2]'  -stim_base 9  -stim_label 9 yaw_02   \
-    -stim_file 10 motion_deriv.1D'[3]'  -stim_base 10 -stim_label 10  dS_02  \
-    -stim_file 11 motion_deriv.1D'[4]'  -stim_base 11 -stim_label 11  dL_02  \
-    -stim_file 12 motion_deriv.1D'[5]'  -stim_base 12 -stim_label 12  dP_02  \
-    -fout -tout -x1D X.xmat.1D -x1D_uncensored X.nocensor.xmat.1D \
-    -fitts fitts \
-    -errts errts \
-    -jobs 6
-fi
-
-
-
-# Blur
-# done after deconvolution, so WM signal is not mixed with GM
-
-hold=`fslhd Resting.nii.gz | grep "pixdim1" | awk '{print $2}'`
-int=`printf "%.0f" $hold`
-vsz="$(($int * 2))"
-blurName=errts_out+tlrc
-
-if [ $blurFlag == 1 ]; then
-    if [ ! -f ${blurName}.HEAD ]; then
-
-        3dmerge -1blur_fwhm $vsz -doall -prefix ${blurName%+*} errts+tlrc
-    fi
-else
-    cp errts+tlrc.HEAD ${blurName}.HEAD
-    cp errts+tlrc.BRIK ${blurName}.BRIK
-fi
-
-
-# Project out regression matrix
-if [ ! -f errts_tproject+tlrc.HEAD ]; then
-
-    3dTproject -polort 0 -input volreg_Resting_ANTS_resampled+tlrc -censor censor_combined_2.1D -cenmode ZERO \
-    -ort X.nocensor.xmat.1D -prefix errts_tproject
-fi
-
-
-
-#1d_tool.py -show_cormat_warnings -infile X.xmat.1D |& tee out.cormat_warn.txt
-
-
-
-# Combine runs, get signal to noise ratio
-if [ ! -f TSNR+tlrc.HEAD ]; then
-
-    3dTcat -prefix all_runs volreg_Resting_ANTS_resampled+tlrc
-    3dTstat -mean -prefix rm.signal.all all_runs+tlrc"[$ktrs]"
-    3dTstat -stdev -prefix rm.noise.all errts_tproject+tlrc"[$ktrs]"
-    3dcalc -a rm.signal.all+tlrc -b rm.noise.all+tlrc -c full_mask+tlrc -expr 'c*a/b' -prefix TSNR
-fi
-
-
-
-# compute global correlation average
-if [ ! -f out_gcor.1D ]; then
-
-    3dTnorm -norm2 -prefix rm.errts.unit errts_tproject+tlrc
-    3dmaskave -quiet -mask full_mask+tlrc rm.errts.unit+tlrc > gmean_errts_unit.1D
-    3dTstat -sos -prefix - gmean_errts_unit.1D\' > out_gcor.1D
-fi
-
-
-
-# Compute correlation volume
-if [ ! -f rm.DP+tlrc.HEAD ]; then
-
-    3dcalc -a rm.errts.unit+tlrc -b gmean_errts_unit.1D -expr 'a*b' -prefix rm.DP
-    3dTstat -sum -prefix corr_brain rm.DP+tlrc
-fi
-
-
-
-# Compute sum of non-baseline regressors
-if [ ! -f sum_ideal.1D ]; then
-
-    reg_cols=`1d_tool.py -infile X.nocensor.xmat.1D -show_indices_interest`
-    3dTstat -sum -prefix sum_ideal.1D X.nocensor.xmat.1D"[$reg_cols]"
-    1dcat X.nocensor.xmat.1d"[$reg_cols]" > X.stim.xmat.1D
-fi
-
-
-### 3dFWHMx
-> blur_est.1D
-> blur_epits.1D
-> blur_errts.1D
-
-# model uncensored TRs
-trs=`1d_tool.py -infile X.xmat.1D -show_trs_uncensored encoded -show_trs_run 1`
-3dFWHMx -detrend -mask full_mask+tlrc all_runs+tlrc"[${trs}]" >> blur_epits.1D
-3dFWHMx -detrend -mask full_mask+tlrc errts_tproject+tlrc"[${trs}]" >> blur_errts.1D
-
-# compute avg blur, append
-blursA=`cat blur_epits.1D`
-blursB=`cat blur_errts.1D`
-
-echo "$blursA  # epits blur estimates" >> blur_est.1D
-echo "$blursB  # errts blur estimages" >> blur_est.1D
-
-
-# pull JLF label connectivity
-if [ $jlfFlag == 1 ]; then
-    c=0; while [ $c -lt $roiLen ]; do
-
-        seedName=Seed_${roiName[$c]}
-
-        if [ ! -f FINAL_${seedName}+tlrc.HEAD ]; then
-
-            jlfPrior=${jlfDir}/label_${roiList[$c]}.nii.gz
-
-            3dcopy $jlfPrior tmp_${seedName}+tlrc
-            3dfractionize -template $blurName -input tmp_${seedName}+tlrc -prefix tmp_rs_${seedName}
-            3dcalc -a tmp_rs_${seedName}+tlrc -prefix $seedName -expr "step(a)" && rm tmp*
-
-            3dROIstats -quiet -mask ${seedName}+tlrc $blurName > ${seedName}_TimeSeries.1D
-            3dTcorr1D -mask full_mask+tlrc -prefix FINAL_${seedName} $blurName ${seedName}_TimeSeries.1D
-        fi
-    let c=$[$c+1]
-    done
-fi
-
-
-
-# generate ROI from coordinates, pull connectivity
-if [ $corFlag == 1 ]; then
-    c=0; while [ $c -lt $coordLen ]; do
-
-        seedName=Seed_${coordName[$c]}
-
-        if [ ! -f FINAL_${seedName}+tlrc.HEAD ]; then
-
-            echo ${coordList[$c]} > ${seedName}.txt
-            3dUndump -prefix $seedName -master $blurName -srad $seedSize -xyz ${seedName}.txt
-            3dROIstats -quiet -mask ${seedName}+tlrc $blurName > ${seedName}_TimeSeries.1D
-            3dTcorr1D -mask full_mask+tlrc -prefix FINAL_${seedName} $blurName ${seedName}_TimeSeries.1D
-        fi
-    let c=$[$c+1]
-    done
+		3drefit -atrcopy tmp_all+orig IJK_TO_DICOM_REAL Resting_${phase}+orig
+	fi
 fi
 
 
 
 
 
+### --- Volreg Setup --- ###
+#
+# Outliers will be detected for later exclusion. The volume of the
+# experiment with the minimum noise will be extracted and serve
+# as volume registration base.
+
+
+if [ ! -s outcount.RS.1D ]; then
+
+	# determine polort arg, outliers
+	len_tr=`3dinfo -tr Resting_${phase}+orig`
+	pol_time=$(echo $(echo $tr_counts*$len_tr | bc)/150 | bc -l)
+	pol=$((1 + `printf "%.0f" $pol_time`))
+	3dToutcount -automask -fraction -polort $pol -legendre Resting_${phase}+orig > outcount.RS.1D
+
+	# censor - more conservative threshold (0.05) used for RS
+	> out.RS.pre_ss_warn.txt
+	1deval -a outcount.RS.1D -expr "1-step(a-0.05)" > out.cen.RS.1D
+	if [ `1deval -a outcount.RS.1D"{0}" -expr "step(a-0.4)"` ]; then
+		echo "** TR #0 outliers: possible pre-steady state TRs in run RS"  >> out.RS.pre_ss_warn.txt
+	fi
+fi
+
+
+# Despike, get min outlier volume
+if [ ! -f vr_base+orig.HEAD ]; then
+
+    3dDespike -NEW -nomask -prefix tmp_despike Resting_${phase}+orig
+
+	minindex=`3dTstat -argmin -prefix - outcount.RS.1D\'`
+	ovals=(`1d_tool.py -set_run_lengths $tr_counts -index_to_run_tr $minindex`)
+	minouttr=${ovals[1]}
+    3dbucket -prefix vr_base tmp_despike+orig"[$minouttr]"
+fi
 
 
 
 
+### --- Normalize Data --- ###
+#
+# First, a rigid transformation with a function will be calculated
+# bx epi & t1. Skull-stripping happens in this step. Second a
+# non-linear diffeomorphich transformation of rotated brain to
+# template space is calculated. Third, we get the volreg calculation.
+# EPI is warped into template space with a single interpolation, by
+# combining the rigid, volreg, and diffeo calculations. T1 also warped,
+# as is the volreg_base by using the appropriate calcs. An extents
+# mask is constructed and used to delete TRs with missing data.
+# Registration cost is recorded
+
+
+# align
+if [ ! -f struct_ns+orig.HEAD ]; then
+
+	align_epi_anat.py \
+	-anat2epi \
+	-anat struct+orig \
+	-save_skullstrip \
+	-suffix _rotated \
+	-epi vr_base+orig \
+	-epi_base 0 \
+	-epi_strip 3dAutomask \
+	-cost lpc+ZZ \
+	-volreg off \
+	-tshift off
+fi
+
+
+# normalize
+if [ ! -f anat.un.aff.qw_WARP.nii ]; then
+	auto_warp.py -base $template -input struct_ns+orig -skull_strip_input no
+	3dbucket -prefix struct_ns awpy/struct_ns.aw.nii*
+	cp awpy/anat.un.aff.Xat.1D .
+	cp awpy/anat.un.aff.qw_WARP.nii .
+fi
+
+
+if [ ! -f struct_ns+tlrc.HEAD ]; then
+	echo >&2
+	echo "Normalization failed - no struct_ns+tlrc.HEAD detected. Exit 5" >&2
+	echo >&2; exit 5
+fi
+
+
+### Move data to template space
+#
+# 3 calcs are used - 1) volreg, 2) rotating struct,
+# and 3) normalization. Epi data is moved from native
+# into template space via 1+(2^-1)+3.
+#
+# Patch for multiband - using volreg to account for
+# vibration in sequence. Move volreg data to template
+# via (2^-1)+3.
+
+if [ ! -f tmp_epi_mask_warped+tlrc.HEAD ]; then
+
+	# calc volreg
+	3dvolreg -verbose -zpad 1 -base vr_base+orig \
+	-1Dfile dfile_Resting_${phase}.1D -prefix tmp_epi_volreg \
+	-cubic \
+	-1Dmatrix_save mat.vr.aff12.1D \
+	tmp_despike+orig
+
+
+	# concat calcs for epi movement (volreg, align, warp)
+	if [ $multiBand == 1 ]; then
+		cat_matvec -ONELINE \
+		anat.un.aff.Xat.1D \
+		struct_rotated_mat.aff12.1D -I > mat.warp_epi.aff12.1D
+	else
+		cat_matvec -ONELINE \
+		anat.un.aff.Xat.1D \
+		struct_rotated_mat.aff12.1D -I \
+		mat.vr.aff12.1D > mat.warp_epi.aff12.1D
+	fi
+
+
+	# warp epi
+	if [ $multiBand == 1 ]; then
+		epiMov=tmp_epi_volreg+orig
+	else
+		epiMov=tmp_despike+orig
+	fi
+
+	3dNwarpApply -master struct_ns+tlrc \
+	-dxyz $gridSize \
+	-source $epiMov \
+	-nwarp "anat.un.aff.qw_WARP.nii mat.warp_epi.aff12.1D" \
+	-prefix tmp_epi_warped_nomask
+
+
+	# warp mask for extents masking; make intersection mask (epi+anat)
+	3dcalc -overwrite -a $epiMov -expr 1 -prefix tmp_epi_mask
+
+	3dNwarpApply -master struct_ns+tlrc \
+	-dxyz $gridSize \
+	-source tmp_epi_mask+orig \
+	-nwarp "anat.un.aff.qw_WARP.nii mat.warp_epi.aff12.1D" \
+	-interp cubic \
+	-ainterp NN -quiet \
+	-prefix tmp_epi_mask_warped
+fi
+
+
+# create epi extents mask
+if [ ! -f tmp_epi_clean+tlrc.HEAD ]; then
+
+	3dTstat -min -prefix tmp_epi_min tmp_epi_mask_warped+tlrc
+	3dcopy tmp_epi_min+tlrc mask_epi_extents
+	3dcalc -a tmp_epi_warped_nomask+tlrc -b mask_epi_extents+tlrc -expr 'a*b' -prefix tmp_epi_clean
+fi
+
+
+# warp volreg base into template space
+if [ ! -f final_vr_base+tlrc.HEAD ];then
+
+	# concat align, warp calcs
+	cat_matvec -ONELINE \
+	anat.un.aff.Xat.1D \
+	struct_rotated_mat.aff12.1D -I  > mat.basewarp.aff12.1D
+
+	3dNwarpApply -master struct_ns+tlrc \
+	-dxyz $gridSize \
+	-source vr_base+orig \
+	-nwarp "anat.un.aff.qw_WARP.nii mat.basewarp.aff12.1D" \
+	-prefix final_vr_base
+fi
+
+
+# anat copy
+if [ ! -f final_anat+tlrc.HEAD ]; then
+	3dcopy struct_ns+tlrc final_anat
+fi
+
+
+# record registration costs; affine warp follower dsets
+if [ ! -f final_anat_head+tlrc.HEAD ]; then
+
+	3dAllineate -base final_vr_base+tlrc -allcostX -input final_anat+tlrc | tee out.allcostX.txt
+
+	3dNwarpApply \
+	-source struct+orig \
+	-master final_anat+tlrc \
+	-ainterp wsinc5 \
+	-nwarp anat.un.aff.qw_WARP.nii anat.un.aff.Xat.1D \
+	-prefix final_anat_head
+fi
+
+
+# Blur data
+if [ ! -f tmp_epi_blur+tlrc.HEAD ]; then
+
+	int=`printf "%.0f" $gridSize`
+	blur=$((2*$int))
+	3dmerge -1blur_fwhm $blur -doall -prefix tmp_epi_blur tmp_epi_clean+tlrc
+fi
 
 
 
+
+### --- Create Masks --- ###
+#
+# An EPI T1 intersection mask is constructed, then tissue-class
+# masks are created (these are used for REML).
+# Tissue seg is based on Atropos Priors
+
+
+# union inputs (combine Run masks); anat mask; intersecting; group
+if [ ! -f final_anat_mask+tlrc.HEAD ]; then
+
+	3dAutomask -prefix tmp_mask_epi tmp_epi_blur+tlrc
+	3dmask_tool -inputs tmp_mask_epi+tlrc.HEAD -union -prefix full_mask
+
+	3dresample -master full_mask+tlrc -input struct_ns+tlrc -prefix tmp_anat_resamp
+	3dmask_tool -dilate_input 5 -5 -fill_holes -input tmp_anat_resamp+tlrc -prefix final_anat_mask
+
+	3dmask_tool -input full_mask+tlrc final_anat_mask+tlrc -inter -prefix mask_epi_anat
+	3dABoverlap -no_automask full_mask+tlrc final_anat_mask+tlrc | tee out.mask_ae_overlap.txt
+
+	3dresample -master full_mask+tlrc -prefix ./tmp_resam_group -input $template
+	3dmask_tool -dilate_input 5 -5 -fill_holes -input tmp_resam_group+tlrc -prefix Template_mask
+fi
+
+
+if [ ! -f final_mask_GM_eroded+tlrc.HEAD ]; then
+
+	# get priors
+	tiss=(CSF GMc WM GMs)
+	prior=(Prior{1..4})
+	tissN=${#tiss[@]}
+
+	c=0; while [ $c -lt $tissN ]; do
+		cp ${actDir}/${prior[$c]}.nii.gz ./tmp_${tiss[$c]}.nii.gz
+		let c=$[$c+1]
+	done
+	c3d tmp_GMc.nii.gz tmp_GMs.nii.gz -add -o tmp_GM.nii.gz
+
+	# resample, erode
+	for i in CSF GM WM; do
+		c3d tmp_${i}.nii.gz -thresh 0.3 1 1 0 -o tmp_${i}_bin.nii.gz
+		3dresample -master tmp_epi_blur+tlrc -rmode NN -input tmp_${i}_bin.nii.gz -prefix tmp_mask_${i}+tlrc
+		3dmask_tool -input tmp_${i}_bin.nii.gz -dilate_input -1 -prefix tmp_mask_${i}_eroded
+		3dresample -master tmp_epi_blur+tlrc -rmode NN -input tmp_mask_${i}_eroded+orig -prefix final_mask_${i}_eroded
+	done
+fi
+
+
+
+
+### --- Scale Data --- ###
+#
+# Scale time series by mean signal.
+
+
+if [ ! -f Resting_${phase}_scale+tlrc.HEAD ]; then
+
+	3dTstat -prefix tmp_tstat tmp_epi_blur+tlrc
+
+	3dcalc \
+	-a tmp_epi_blur+tlrc \
+	-b tmp_tstat+tlrc \
+	-c mask_epi_extents+tlrc \
+	-expr 'c * min(200, a/b*100)*step(a)*step(b)' \
+	-prefix Resting_${phase}_scale
+fi
