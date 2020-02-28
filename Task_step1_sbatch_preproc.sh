@@ -68,7 +68,7 @@ phaseLen=${#phaseArr[@]}
 cd ${dataDir}/func
 
 if [ ${#phaseArr[@]} != ${#blockArr[@]} ]; then
-	echo "$phaseArr and $blockArr are not same length. Exit 1" >&2
+	echo "\$phaseArr and \$blockArr are not same length. Exit 1" >&2
 	exit 1
 fi
 
@@ -80,7 +80,7 @@ done
 
 runCount=`ls *run*.nii.gz | wc -l`
 if [ $runCount != $totBlock ]; then
-	echo "Sum of $blockArr and number of runs are not equal. Exit 2" >&2
+	echo "Sum of \$blockArr and number of runs are not equal. Exit 2" >&2
 	exit 2
 fi
 
