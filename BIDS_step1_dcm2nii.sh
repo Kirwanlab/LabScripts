@@ -158,12 +158,12 @@ for i in ${subjList[@]}; do
 		for k in ${!blipDir[@]}; do
 
 			pos=$(($k+1))
-			if [ ! -f ${fmapDir}/${i}_ses-${session}_dir-${blipEnc}_run-${pos}_phasediff.nii.gz ]; then
-				dcm2niix -b y -ba y -z y -o $fmapDir -f ${i}_ses-${session}_dir-${blipEnc}_run-${pos}_phasediff ${dataDir}/${blipDir}*/
+			if [ ! -f ${fmapDir}/${i}_dir-${blipEnc}_run-${pos}_epi.nii.gz ]; then
+				dcm2niix -b y -ba y -z y -o $fmapDir -f ${i}_dir-${blipEnc}_run-${pos}_epi ${dataDir}/${blipDir}*/
 			fi
 
 			## append Json for intended use
-			fmapJson=${fmapDir}/${i}_ses-${session}_dir-${blipEnc}_run-${pos}_phasediff.json
+			fmapJson=${fmapDir}/${i}_dir-${blipEnc}_run-${pos}_epi.json
 			intendExist=$(cat $fmapJson | jq '.IntendedFor')
 			if [ "$intendExist" == "null" ]; then
 

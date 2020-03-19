@@ -118,13 +118,12 @@ fi
 
 cd $workDir
 
-# build outcount list
+
+## patch for FOV problem: verify voxel dim, resample if needed
 tr_counts=`3dinfo -ntimes Resting_${phase}+orig`
 gridSize=`3dinfo -di Resting_${phase}+orig`
 checkSize=`3dinfo -di $refFile`
 
-
-## patch for FOV problem: verify voxel dim, resample if needed
 if [ $gridSize != $checkSize ]; then
 
 	3dcopy Resting_${phase}+orig Resting_origRes_${phase} && rm Resting_${phase}+orig*
@@ -145,7 +144,7 @@ if [ $blip == 1 ]; then
 	if [ ! -f Resting_${phase}_noBlip+orig.HEAD ]; then
 
 		# medain blip
-		3dTcat -prefix tmp_blip ${rawDir}/ses-${phase}/func/${subj}_task-restblip_bold.nii.gz
+		3dTcat -prefix tmp_blip ${rawDir}/ses-${phase}/fmap/${subj}_dir-*_run-1_epi.nii.gz
 		3dTstat -median -prefix tmp_blip_med tmp_blip+orig
 		3dAutomask -apply_prefix tmp_blip_med_masked tmp_blip_med+orig
 
